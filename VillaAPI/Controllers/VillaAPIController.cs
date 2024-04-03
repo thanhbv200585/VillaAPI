@@ -1,8 +1,8 @@
 ﻿using AutoMapper;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.JsonPatch;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using VillaAPI.Data;
+using System.Net;
 using VillaAPI.Logging;
 using VillaAPI.Models;
 using VillaAPI.Models.Dto;
@@ -14,6 +14,7 @@ namespace VillaAPI.Controllers
     [Route("app/[controller]")]
     public class VillaAPIController : ControllerBase
     {
+        protected APIResponse _response;
         private readonly ILogging _logger;
         private readonly IMapper _mapper;
         private readonly IVillaRepository _villaRepository;
@@ -22,32 +23,56 @@ namespace VillaAPI.Controllers
             _logger = logger;
             _mapper = mapper;
             _villaRepository = villaRepository;
+            _response = new APIResponse();
         }
 
         [HttpGet]
+        [Authorize(Roles = "admin")]
         [ProducesResponseType(StatusCodes.Status200OK)]
-        public async Task<ActionResult<IEnumerable<VillaDto>>> GetVillas()
+        public async Task<ActionResult<APIResponse>> GetVillas()
         {
-            _logger.Log("Getting all villas", "");
-            return Ok(_mapper.Map<List<VillaDto>>(await _villaRepository.GetAllVillasAsync()));
+            try
+            {
+                List<Villa> villaList = await _villaRepository.GetAllVillasAsync();
+                _response.Result = _mapper.Map<List<VillaDto>>(villaList);
+                _response.StatusCode = HttpStatusCode.OK;
+                return Ok(_response);
+            }
+            catch (Exception ex)
+            {
+                _response.IsSuccess = false;
+                _response.ErrorMessages = new List<string> { ex.Message };
+                return BadRequest(_response);
+            }
         }
 
-        [HttpGet("id", Name = "GetVilla")]
+        [HttpGet("{id}", Name = "GetVilla")]
+        [Authorize(Roles = "admin")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<ActionResult<VillaDto>> GetVilla(int id)
+        public async Task<ActionResult<APIResponse>> GetVilla(int id)
         {
             if (id == 0)
             {
+                _response.StatusCode = HttpStatusCode.BadRequest;
                 _logger.Log("Get Villa Error with Id: " + id, "error");
-                return BadRequest("Invalid ID");
+                return BadRequest(_response);
             }
             var villa = await _villaRepository.GetVillaAsync(id);
-            return villa == null ? NotFound() : Ok(_mapper.Map<VillaDto>(villa));
+            if (villa == null)
+            {
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.NotFound;
+                return NotFound(_response);
+            }
+            _response.Result = _mapper.Map<VillaDto>(villa);
+            _response.StatusCode = HttpStatusCode.OK;
+            return Ok(_response);
         }
 
         [HttpPost(Name = "CreateVilla")]
+        [Authorize(Roles = "admin")]
         public async Task<ActionResult<int>> CreateVilla([FromBody] VillaCreateDto villaDto)
         {
             if (villaDto == null)
@@ -99,16 +124,21 @@ namespace VillaAPI.Controllers
         [HttpPut("{id}", Name = "UpdateVilla")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<ActionResult<int>> UpdateVilla(int id, [FromBody] VillaUpdateDto villaDto)
+        public async Task<ActionResult<APIResponse>> UpdateVilla(int id, [FromBody] VillaUpdateDto villaDto)
         {
             try
             {
-                return Ok(await _villaRepository.UpdateVillaAsync(id, villaDto));
+                await _villaRepository.UpdateVillaAsync(id, villaDto);
+                _response.IsSuccess = true;
+                _response.StatusCode = HttpStatusCode.NoContent;
+                return Ok(_response);
             }
             catch (Exception ex)
             {
                 _logger.Log(ex.Message, "error");
-                return BadRequest(ex.Message);
+                _response.IsSuccess = false;
+                _response.ErrorMessages = new List<string> { ex.Message };
+                return BadRequest(_response);
             }
         }
 
